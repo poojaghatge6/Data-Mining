@@ -1,0 +1,506 @@
+---
+title: "hw3-pog4"
+author: "Pooja Ghatge"
+date: "February 23, 2018"
+output: html_document
+---
+
+#### Q1
+```{r warning=FALSE}
+
+# hw3sample.R - sample code for hw3
+#
+# @author: Yu-Ru Lin
+# @date: 2015-02-05
+library(car) 
+library(caTools) 
+library(textir)
+library(data.table)
+library(MASS) # for the example dataset 
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(ada) # for adaboost
+library(class) #knn
+set.seed(12345) # set the seed so you can get exactly the same results whenever you run the code
+
+do.classification <- function(train.set, test.set, 
+                              cl.name, verbose=F) {
+  ## note: to plot ROC later, we want the raw probabilities,
+  ## not binary decisions
+  switch(cl.name, 
+         knn = { # here we test k=3; you should evaluate different k's
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 3, prob=T)
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         lr = { # logistic regression
+           model = glm(y~., family=binomial, data=train.set)
+           if (verbose) {
+             print(summary(model))             
+           }
+           prob = predict(model, newdata=test.set, type="response") 
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         nb = {
+           model = naiveBayes(y~., data=train.set)
+           prob = predict(model, newdata=test.set, type="raw") 
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         },
+         dtree = {
+           model = rpart(y~., data=train.set, method="class")
+           if (verbose) {
+             print(summary(model)) # detailed summary of splits
+             printcp(model) # print the cross-validation results
+             plotcp(model) # visualize the cross-validation results
+             ## plot the tree
+             plot(model, uniform=TRUE, main="Classification Tree")
+             text(model, use.n=TRUE, all=TRUE, cex=.8)
+           }           
+           prob = predict(model, newdata=test.set, type="prob")
+           
+           if (0) { # here we use the default tree, 
+             ## you should evaluate different size of tree
+             ## prune the tree 
+             pfit<- prune(model, cp=model$cptable[which.min(model$cptable[,"xerror"]),"CP"])
+             prob = predict(pfit, newdata=test.set, type="prob")
+             ## plot the pruned tree 
+             plot(pfit, uniform=TRUE,main="Pruned Classification Tree")
+             text(pfit, use.n=TRUE, all=TRUE, cex=.8)             
+           }
+           print(dim(prob))
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         },
+         svm = {
+           model = svm(y~., data=train.set,type="C-classification",kernel="linear", probability=TRUE)
+           if (0) { # fine-tune the model with different kernel and parameters
+             ## evaluate the range of gamma parameter between 0.000001 and 0.1
+             ## and cost parameter from 0.1 until 10
+             tuned <- tune.svm(y~., data = train.set, 
+                               kernel="radial", probability=TRUE,
+                               gamma = 10^(-6:-1), cost = 10^(-1:1))
+             #print(summary(tuned))
+             gamma = tuned[['best.parameters']]$gamma
+             cost = tuned[['best.parameters']]$cost
+             model = svm(y~., data = train.set, probability=TRUE, 
+                         kernel="radial", gamma=gamma, cost=cost)                        
+           }
+           prob = predict(model, newdata=test.set,probability=TRUE)
+         
+           prob=attr(prob,"probabilities")
+          
+           prob = prob[,which(colnames(prob)==1)]/rowSums(prob)
+           prob
+         },
+         ada = {
+           model = ada(y~., data = train.set)
+           prob = predict(model, newdata=test.set, type='probs')
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob)
+           prob
+         }
+  ) 
+}
+#svm_result = my.classifier(dataset, cl.name='svm',do.cv=T)
+pre.test <- function(dataset, cl.name, r=0.6, prob.cutoff=0.5) {
+  ## Let's use 60% random sample as training and remaining as testing
+  ## by default use 0.5 as cut-off
+  n.obs <- nrow(dataset) # no. of observations in dataset
+  n.train = floor(n.obs*r)
+  train.idx = sample(1:n.obs,n.train)
+  train.idx
+  train.set = dataset[train.idx,]
+  test.set = dataset[-train.idx,]
+  cat('pre-test',cl.name,':',
+      '#training:',nrow(train.set),
+      '#testing',nrow(test.set),'\n')
+  prob = do.classification(train.set, test.set, cl.name)
+  # prob is an array of probabilities for cases being positive
+  
+  ## get confusion matrix
+  predicted = as.numeric(prob > prob.cutoff)
+  actual = test.set$y
+  confusion.matrix = table(actual,factor(predicted,levels=c(0,1)))
+  error = (confusion.matrix[1,2]+confusion.matrix[2,1]) / nrow(test.set)  
+  cat('error rate:',error,'\n')
+  # you may compute other measures based on confusion.matrix
+  # @see handout03 p.32-36
+  
+  ## plot ROC
+  result = data.frame(prob,actual)
+  pred = prediction(result$prob,result$actual)
+  perf = performance(pred, "tpr","fpr")
+}
+k.fold.cv <- function(dataset, cl.name, k.fold=10, prob.cutoff=0.5) {
+  ## default: 10-fold CV, cut-off 0.5 
+  n.obs <- nrow(dataset) # no. of observations 
+  s = sample(n.obs)
+  errors = dim(k.fold)
+  probs = NULL
+  actuals = NULL
+  for (k in 1:k.fold) {
+    test.idx = which(s %% k.fold == (k-1) ) # use modular operator
+    train.set = dataset[-test.idx,]
+    test.set = dataset[test.idx,]
+    cat(k.fold,'-fold CV run',k,cl.name,':',
+        '#training:',nrow(train.set),
+        '#testing',nrow(test.set),'\n')
+    prob = do.classification(train.set, test.set, cl.name)
+    predicted = as.numeric(prob > prob.cutoff)
+    actual = test.set$y
+    confusion.matrix = table(actual,factor(predicted,levels=c(0,1)))
+    confusion.matrix
+    error = (confusion.matrix[1,2]+confusion.matrix[2,1]) / nrow(test.set)  
+    errors[k] = error
+    cat('\t\terror=',error,'\n')
+    probs = c(probs,prob)
+    actuals = c(actuals,actual)
+    ## you may compute other measures and store them in arrays
+  }
+  avg.error = mean(errors)
+  cat(k.fold,'-fold CV results:','avg error=',avg.error,'\n')
+  
+  ## plot ROC
+  result = data.frame(probs,actuals)
+  pred = prediction(result$probs,result$actuals)
+  perf = performance(pred, "tpr","fpr")
+  
+  
+  ## get other measures by using 'performance'
+  get.measure <- function(pred, measure.name='auc') {
+    perf = performance(pred,measure.name)
+    m <- unlist(slot(perf, "y.values"))
+    #     print(slot(perf, "x.values"))
+    #     print(slot(perf, "y.values"))
+    m
+  }
+  err = mean(get.measure(pred, 'err'))
+  precision = mean(get.measure(pred, 'prec'),na.rm=T)
+  recall = mean(get.measure(pred, 'rec'),na.rm=T)
+  fscore = mean(get.measure(pred, 'f'),na.rm=T)
+  cat('error=',err,'precision=',precision,'recall=',recall,'f-score',fscore,'\n')
+  auc = get.measure(pred, 'auc')
+  cat('auc=',auc,'\n')
+  vectorx=c(err,precision,recall,fscore,auc)
+  return(vectorx)
+}
+my.classifier <- function(dataset, cl.name='knn', do.cv=F) {
+  n.obs <- nrow(dataset) # no. of observations in dataset
+  n.cols <- ncol(dataset) # no. of predictors
+  cat('my dataset:',
+      n.obs,'observations',
+      n.cols-1,'predictors','\n')
+  
+  pre.test(dataset, cl.name)
+  if (do.cv) vectorx=k.fold.cv(dataset, cl.name)
+  return(vectorx)
+}
+
+load.data.example <- function() {
+ 
+  dataset= read.csv("pokemon.csv", header=T)
+  head(dataset[3:5,])
+  dataset=dataset[,-1]
+  dataset=dataset[,-1]
+  
+  dataset$Total=recode(dataset$Total,"'>500'=1;else=0")
+  dataset$Total=as.numeric(levels(dataset$Total)[dataset$Total])
+  dataset$Generation=as.factor(dataset$Generation)
+  
+  dataset_mat= model.matrix(Total~.,data=dataset)[,-1] 
+  dataset=cbind(dataset_mat,dataset$Total)
+  dataset=data.frame(dataset)
+  
+  dataset[1:3,]
+  dataset <- subset(dataset, select = -c(Type.2NO) )
+  dataset[,c(35:40)]=scale(dataset[,c(35:40)])
+  dataset=rename(dataset,c('V48'='y'))
+  #y = mapvalues(cats$Sex, from=c('F','M'), to=c(0,1))
+  return(dataset)
+}
+
+
+### main ###
+dataset = load.data.example()
+knn_result = my.classifier(dataset, cl.name='knn',do.cv=T)
+nb_result = my.classifier(dataset, cl.name='nb',do.cv=T)
+lr_result = my.classifier(dataset, cl.name='lr',do.cv=T)
+dtree_result = my.classifier(dataset, cl.name='dtree',do.cv=T)
+svm_result = my.classifier(dataset, cl.name='svm',do.cv=T)
+ada_result = my.classifier(dataset, cl.name='ada',do.cv=T)
+# cl.name can take 'lr','knn','nb','dtree','svm','ada'
+measures=c('err','precision','recall','fscore','AUC')
+Table=rbind(measures,knn_result,nb_result,lr_result,dtree_result,ada_result,svm_result)
+Table
+fscore_vector=as.numeric(Table[2:7,4])
+AUC_vector=as.numeric(Table[2:7,5])
+barplot(fscore_vector,names.arg=c('kNN','Naive Bayes','Logistic','D_Tree','Ada','SVM'), ylab='f-score')
+barplot(AUC_vector,names.arg=c('kNN','Naive Bayes','Logistic','D_Tree','Ada','SVM'), ylab='AUC')
+
+```
+
+
+
+
+
+
+
+#### Q2
+
+```{r  warning=FALSE}
+do.classification <- function(train.set, test.set, 
+                              cl.name, verbose=F) {
+  ## note: to plot ROC later, we want the raw probabilities,
+  ## not binary decisions
+  switch(cl.name, 
+         knn = { # here we test k=3; you should evaluate different k's
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 2, prob=T)
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+       
+         dtree = {
+           model = rpart(y~., data=train.set, method="class")
+           if (verbose) {
+             print(summary(model)) # detailed summary of splits
+             printcp(model) # print the cross-validation results
+             plotcp(model) # visualize the cross-validation results
+             ## plot the tree
+             plot(model, uniform=TRUE, main="Classification Tree")
+             text(model, use.n=TRUE, all=TRUE, cex=.8)
+           }           
+           
+           if (1) { # here we use the default tree, 
+             ## you should evaluate different size of tree
+             ## prune the tree 
+             pfit<- prune(model, cp=model$cptable[which.min(model$cptable[,"xerror"]),"CP"])
+             prob = predict(pfit, newdata=test.set, type="prob")
+             ## plot the pruned tree 
+             plot(pfit, uniform=TRUE,main="Pruned Classification Tree")
+             text(pfit, use.n=TRUE, all=TRUE, cex=.8)             
+           }
+          prob = predict(model, newdata=test.set, type="prob")
+           print(dim(prob))
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         },
+         svm = {
+      
+           if (1) { # fine-tune the model with different kernel and parameters
+             ## evaluate the range of gamma parameter between 0.000001 and 0.1
+             ## and cost parameter from 0.1 until 10
+             tuned <- tune.svm(y~., data = train.set,
+                               kernel="radial", probability=TRUE,
+                               gamma = 10^(-6:-1), cost = 10^(-1:1))
+             #print(summary(tuned))
+             gamma = tuned[['best.parameters']]$gamma
+             cost = tuned[['best.parameters']]$cost
+             model = svm(y~., data = train.set, probability=TRUE,
+                         type="C-classification",
+                         kernel="radial", gamma=gamma, cost=cost)                        
+           }
+           prob = predict(model, newdata=test.set,probability=TRUE)
+         
+           prob=attr(prob,"probabilities")
+          
+           prob = prob[,which(colnames(prob)==1)]/rowSums(prob)
+           prob
+         }
+  ) 
+}
+
+dataset = load.data.example()
+knn2_result = my.classifier(dataset, cl.name='knn',do.cv=T)
+
+dtree_pruned_result = my.classifier(dataset, cl.name='dtree',do.cv=T)
+svm_radial_result = my.classifier(dataset, cl.name='svm',do.cv=T)
+# cl.name can take 'lr','knn','nb','dtree','svm','ada'
+measures=c('err','precision','recall','fscore','AUC')
+Table=rbind(measures,knn_result,knn2_result,dtree_result,dtree_pruned_result,svm_result,svm_radial_result)
+Table
+fscore_vector=as.numeric(Table[2:7,4])
+AUC_vector=as.numeric(Table[2:7,5])
+barplot(fscore_vector,names.arg=c('kNN3','kNN2','D_tree','DT_pruned','SVM_lin','SVM_radial'), ylab='f-score')
+barplot(AUC_vector,names.arg=c('kNN3','kNN2','D_tree','DT_pruned','SVM_lin','SVM_radial'), ylab='AUC')
+
+```
+
+
+
+
+
+
+#### Q3
+
+```{r warning=FALSE}
+
+do.classification <- function(train.set, test.set, 
+                              cl.name, verbose=F) {
+  ## note: to plot ROC later, we want the raw probabilities,
+  ## not binary decisions
+  switch(cl.name, 
+         knn = { # here we test k=3; you should evaluate different k's
+           prob = knn(train.set[,-1], test.set[,-1], cl=train.set[,1], k = 3, prob=T)
+           prob = attr(prob,"prob")
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         lr = { # logistic regression
+           model = glm(y~., family=binomial, data=train.set)
+           if (verbose) {
+             print(summary(model))             
+           }
+           prob = predict(model, newdata=test.set, type="response") 
+           #print(cbind(prob,as.character(test.set$y)))
+           prob
+         },
+         nb = {
+           model = naiveBayes(y~., data=train.set)
+           prob = predict(model, newdata=test.set, type="raw") 
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         },
+       
+         svm = {
+           model = svm(y~., data=train.set,type="C-classification",kernel="linear", probability=TRUE)
+          
+           prob = predict(model, newdata=test.set,probability=TRUE)
+         
+           prob=attr(prob,"probabilities")
+          
+           prob = prob[,which(colnames(prob)==1)]/rowSums(prob)
+           prob
+         },
+         ada = {
+           model = ada(y~., data = train.set)
+           prob = predict(model, newdata=test.set, type='probs')
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob)
+           prob
+         }
+  ) 
+}
+
+k.fold.cv <- function(dataset, cl.name, k.fold=10, prob.cutoff=0.5) {
+  ## default: 10-fold CV, cut-off 0.5 
+  n.obs <- nrow(dataset) # no. of observations 
+  s = sample(n.obs)
+  errors = dim(k.fold)
+  probs = NULL
+  actuals = NULL
+  for (k in 1:k.fold) {
+    test.idx = which(s %% k.fold == (k-1) ) # use modular operator
+    train.set = dataset[-test.idx,]
+    test.set = dataset[test.idx,]
+    cat(k.fold,'-fold CV run',k,cl.name,':',
+        '#training:',nrow(train.set),
+        '#testing',nrow(test.set),'\n')
+    prob = do.classification(train.set, test.set, cl.name)
+    predicted = as.numeric(prob > prob.cutoff)
+    actual = test.set$y
+    confusion.matrix = table(actual,factor(predicted,levels=c(0,1)))
+    confusion.matrix
+    error = (confusion.matrix[1,2]+confusion.matrix[2,1]) / nrow(test.set)  
+    errors[k] = error
+    cat('\t\terror=',error,'\n')
+    probs = c(probs,prob)
+    actuals = c(actuals,actual)
+    ## you may compute other measures and store them in arrays
+  }
+  avg.error = mean(errors)
+  cat(k.fold,'-fold CV results:','avg error=',avg.error,'\n')
+  
+  ## plot ROC
+  result = data.frame(probs,actuals)
+  pred = prediction(result$probs,result$actuals)
+  perf = performance(pred, "tpr","fpr")
+  return(perf)
+}
+
+dataset = load.data.example()
+knn3_ROC = my.classifier(dataset, cl.name='knn',do.cv=T)
+nb_ROC = my.classifier(dataset, cl.name='nb',do.cv=T)
+lr_ROC = my.classifier(dataset, cl.name='lr',do.cv=T)
+svm_Lin_ROC = my.classifier(dataset, cl.name='svm',do.cv=T)
+ada_ROC = my.classifier(dataset, cl.name='ada',do.cv=T)
+
+do.classification <- function(train.set, test.set, 
+                              cl.name, verbose=F) {
+  ## note: to plot ROC later, we want the raw probabilities,
+  ## not binary decisions
+  switch(cl.name, 
+
+       
+         dtree = {
+           model = rpart(y~., data=train.set, method="class")
+           if (verbose) {
+             print(summary(model)) # detailed summary of splits
+             printcp(model) # print the cross-validation results
+             plotcp(model) # visualize the cross-validation results
+             ## plot the tree
+             plot(model, uniform=TRUE, main="Classification Tree")
+             text(model, use.n=TRUE, all=TRUE, cex=.8)
+           }           
+           
+           if (1) { # here we use the default tree, 
+             ## you should evaluate different size of tree
+             ## prune the tree 
+             pfit<- prune(model, cp=model$cptable[which.min(model$cptable[,"xerror"]),"CP"])
+             prob = predict(pfit, newdata=test.set, type="prob")
+             ## plot the pruned tree 
+      
+           }
+         
+           print(dim(prob))
+           #print(cbind(prob,as.character(test.set$y)))
+           prob = prob[,2]/rowSums(prob) # renormalize the prob.
+           prob
+         }
+         
+  ) 
+}
+
+dtree_ROC = my.classifier(dataset, cl.name='dtree',do.cv=T)
+
+plot(knn3_ROC,main="ROC Curve", labels="kNN3", col="red")
+plot(nb_ROC, add=TRUE, labels="Naive",col="blue")
+plot(lr_ROC, add=TRUE, col="green")
+plot(svm_Lin_ROC, add=TRUE, col="pink")
+plot(ada_ROC, add=TRUE, col="black")
+plot(dtree_ROC, add=TRUE, col="yellow")
+
+legend("bottomright",
+c("kNN3","Naive","Logistic","SVM_lin","AdaBoost","Dtree_prun"),
+fill=c("red","blue","green","pink","black","yellow")
+)
+
+
+```
+
+
+
+
+#### Q4
+
+Pruned decision tree shows higher AUC than the default one. This is because pruning handles overfitting of data.
+SVM with radial kernel does not perform better than SVM with linear kernel. This is because we do not need a non-linear plane to separate the data, a linear plane can separate it. As k decreases overfitting occurs. Hence, kNN with k=3 performs better than k=2.
+
+Overall, the models which performed really well are SVM, Adaboost, logistic regression. Among these, the f-score of logistic regression was drastically higher than others.The performances of the models, Naive Bayes and Decision Tree were relatively good but not better than the models mentioned above. This could be because in Naive Bayes we assume that features are independent of each other, which may not be always true. The worst performance was shown by kNN. I didn't try increasing the k value above 3, kNN performance could improve with increasing k.
+
+The performance ranking of the models according to their AUC are:
+1)SVM-linear
+2)Logistic regression
+3)Adaboost
+4)Pruned decision tree
+5)Naive Bayes
+6)k-Nearest Neighbours(k=3)
