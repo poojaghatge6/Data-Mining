@@ -1,0 +1,273 @@
+### Q1 a)
+
+#### There are no missing values in the dataset. Numeric variables:Age, Medu, Fedu, traveltime,  studytime, failures, famrel, freetime, goout, Dalc, Walc, Health, absences, G1, G2. Categorical  Variables: school, sex, address, famsize, Pstatus, Mjob, Fjob, reason, guardian, schoolsup, famsup, paid, activities, nursery, higher, internet, romantic. Response Variable:G3. Except the response variable rest all variables are the predictors.
+ 
+
+### Q2 a)
+```{r}
+dataset=read.csv('student-mat.csv',header=T, sep=";")
+
+dataset_new=data.frame(dataset$age,dataset$address,dataset$Pstatus,
+                     dataset$activities,dataset$higher,dataset$internet,dataset$absences,dataset$G1,
+                     dataset$G2,dataset$G3)
+colnames(dataset_new)<-c('age','address','Pstatus',
+                     'activities','higher','internet','absences','G1',
+                     'G2','G3')
+dataset_new_numeric=data.frame(dataset$age,dataset$absences,dataset$G1,
+                     dataset$G2,dataset$G3)
+colnames(dataset_new_numeric)<-c('age','absences','G1',
+                     'G2','G3'
+                     )
+dataset_new_categorical=data.frame(dataset$address,dataset$Pstatus,
+                     dataset$activities,dataset$higher,dataset$internet)
+colnames(dataset_new_categorical)<-c('address','Pstatus',
+                     'activities','higher','internet' )
+j=1
+for(i in dataset_new_numeric){
+print(attributes(dataset_new_numeric)$names[j])
+print(summary(i))
+print("Standard deviation: ")
+print(sd(i))
+j=j+1
+
+}
+
+```
+### Q2 b)
+```{r fig.width=3.5,fig.height=3}
+library('ggplot2') 
+theme_set(theme_bw())
+
+
+j=1
+for (i in dataset_new_numeric) {
+x <- i
+plot(density(i))
+y=attributes(dataset_new_numeric)$names[j]
+h<-hist(x, breaks=10, col="red", xlab=y, 
+  	main="Histogram with Normal Curve") 
+xfit<-seq(min(x),max(x),length=40) 
+yfit<-dnorm(xfit,mean=mean(x),sd=sd(x)) 
+yfit <- yfit*diff(h$mids[1:2])*length(x) 
+lines(xfit, yfit, col="blue", lwd=2)
+j=j+1
+}
+```
+
+
+
+
+#### Looking at the histogram with normal curve, it can be easily said that G1, G2 and G3 numeric variables have approximate normal distribution. Since, their density curve matches the normal curve and maximum data points lie near the mean with 1st and 3rd quartile being almost the same.
+
+#### The numeric variables age is observed to be right-skewed. Majority of data points are to the left side of the mean. The numeric variable is also skewed since its 1st and 3rd quartile are not symmetric. 
+
+### Q2 c)
+```{r}
+cor(dataset_new_numeric)
+library(car)
+suppressWarnings( ## (avoid printing the warnings)
+scatterplotMatrix(dataset_new_numeric, spread=FALSE, lty.smooth=2,
+                  main="Scatter Plot Matrix")
+)
+```
+
+
+
+
+
+#### The variables G1 and G2 are linearly positively correlated to target variable G3 i.e value of G3 increases with G1 and G2. The variables age and absences are not correlated to G3.
+
+### Q2 d)
+
+```{r fig.width=3.5,fig.height=3}
+G3=dataset_new_numeric$G3
+library(ggplot2)
+theme_set(theme_bw())
+
+  address=dataset_new_categorical$address
+ggplot(data =dataset_new) + 
+   geom_density(mapping = aes(x = G3, color = address))
+
+ Pstatus=dataset_new_categorical$Pstatus
+ggplot(data =dataset_new) + 
+   geom_density(mapping = aes(x = G3, color = Pstatus))
+
+ activities=dataset_new_categorical$activities
+ggplot(data =dataset_new) + 
+   geom_density(mapping = aes(x = G3, color = activities))
+
+ higher=dataset_new_categorical$higher
+ggplot(data =dataset_new) + 
+   geom_density(mapping = aes(x = G3, color = higher))
+
+ internet=dataset_new_categorical$internet
+ggplot(data =dataset_new) + 
+   geom_density(mapping = aes(x = G3, color= internet))
+
+```
+
+
+
+
+
+### Q2 e)
+
+#### The density distribution of response variable is same for students with and without extra-curricular activities. Hence response variable is not significantly different for students with and without extra-curricular activities.
+
+### Q3 a)
+```{r}
+fit = lm(G3 ~ school + sex + age + address +  famsize + Pstatus + Medu + Fedu + Mjob + Fjob + reason + guardian + traveltime+ studytime + failures + schoolsup + famsup + paid + activities + nursery + higher + internet + romantic + famrel + freetime + goout + Dalc + Walc + health + absences + G1 + G2, data=dataset)
+summary(fit)
+
+y=dataset$G3
+mean.mse = mean((rep(mean(y),length(y)) - y)^2)
+model.mse = mean(residuals(fit)^2)
+rmse = sqrt(model.mse)
+rmse 
+
+r2 = 1 - (model.mse / mean.mse)
+r2
+
+```
+#### Multiple R-squared value is 0.8458. It means that it has 84.58% correlation between actual and predicted outcome. Its P value is almost equivalent to zero which shows that the model is significant. Adjusted R-squared is more reiable measure, since it takes into account all the variables.
+### Q3 b)
+
+```{r}
+
+n = length(dataset$G3)
+error = dim(n)
+for (k in 1:n) {
+  train1 = c(1:n)
+  train = train1[train1!=k] ## pick elements that are different from k
+  m2 = lm(G3 ~ school + sex + age + address + Pstatus + Medu + Fedu + Mjob + Fjob +
+  traveltime + studytime + failures + absences + G1 + G2 , data=dataset[train,])
+  pred = predict(m2, newdat=dataset[-train ,])
+  obs = dataset$G3[-train]
+  error[k] = obs-pred
+}
+me=mean(error)
+me
+
+rmse=sqrt(mean(error^2))
+rmse
+# setB
+n = length(dataset$G3)
+error = dim(n)
+for (k in 1:n) {
+  train1 = c(1:n)
+  train = train1[train1!=k] ## pick elements that are different from k
+  m2 = lm(G3 ~  school + sex + age + studytime + failures + absences + G1 + G2 , data=dataset[train,])
+  pred = predict(m2, newdat=dataset[-train ,])
+  obs = dataset$G3[-train]
+  error[k] = obs-pred
+}
+me=mean(error)
+me
+
+rmse=sqrt(mean(error^2))
+rmse
+#fit2 = lm(G3 ~ school + sex + age + studytime + failures + absences + G1 + G2, data=dataset)
+#summary(fit2)   
+
+#fit3= lm(G3 ~ school + sex + age + address + Pstatus + Medu + Fedu + Mjob + Fjob + traveltime + G1 + G2, data=dataset)
+#summary(fit3)
+n = length(dataset$G3)
+error = dim(n)
+for (k in 1:n) {
+  train1 = c(1:n)
+  train = train1[train1!=k] ## pick elements that are different from k
+  m2 = lm(G3 ~  school + sex + age + address + Pstatus + Medu + Fedu + Mjob + Fjob + traveltime + G1 + G2 ,  data=dataset[train,])
+  pred = predict(m2, newdat=dataset[-train ,])
+  obs = dataset$G3[-train]
+  error[k] = obs-pred
+}
+me=mean(error)
+me
+
+rmse=sqrt(mean(error^2))
+rmse
+
+```
+
+#### Set B performs the best because its Root mean Square error is the minimum after implementing leave one out cross-validation technique.
+
+### Q3 c)
+
+#### Polynomial Regression
+```{r}
+
+X<-dataset[c('Medu','Fedu','traveltime','G1','G2')]
+library(MASS)
+
+Y = dataset$G3
+
+X <- transform(X, X2 = X ^ 2,X3 = X ^ 3)
+
+df=cbind(X,Y)
+
+fit=lm(Y ~ ., data = df)
+fit2=stepAIC(fit, direction="backward")
+summary(fit2)
+
+```
+#### Leave one out cross-validation
+```{r}
+
+df=data.frame(df)
+xy = df[c(4,5,10,13,15,16)] # G1, G2, X2.G2, X3.traveltime, X3.G2 selected  Backward feature #selection
+xy=data.frame(xy)
+n = length(xy$Y)
+error = dim(n)
+for (k in 1:n) {
+  train1 = c(1:n)
+  train = train1[train1!=k] ## pick elements that are different from k
+  m2 = lm(Y ~ .,  data=xy[train,])
+  pred = predict(m2, newdat=xy[-train ,])
+  obs = xy$Y[-train]
+  error[k] = obs-pred
+}
+me=mean(error)
+me
+
+rmse=sqrt(mean(error^2))
+rmse
+
+```
+### Lasso
+```{r}
+
+x <- model.matrix(G3~. ,data=dataset)
+x=x[,-1]
+library(lars)
+
+MSElasso25=dim(10)
+MSElasso50=dim(10)
+MSElasso75=dim(10)
+MSElasso100=dim(10)
+set.seed(1)
+for(i in 1:10){
+  train <- sample(1:nrow(dataset),80)
+  lasso <- lars(x=x[train ,],y=dataset$G3[train])
+  MSElasso25[i]=
+    mean((predict(lasso ,x[-train ,],s=.25,mode="fraction")$fit -dataset$G3[-train ])^2)
+  MSElasso50[i]=
+    mean((predict(lasso ,x[-train ,],s=.50,mode="fraction")$fit -dataset$G3[-train ])^2)
+  MSElasso75[i]=
+    mean((predict(lasso ,x[-train ,],s=.75,mode="fraction")$fit -dataset$G3[-train ])^2)
+  MSElasso100[i]=
+    mean((predict(lasso ,x[-train ,],s=1.00,mode="fraction")$fit -dataset$G3[-train ])^2)
+}
+
+rmse_25=sqrt(mean(MSElasso25))
+rmse_50=sqrt(mean(MSElasso25))
+rmse_75=sqrt(mean(MSElasso25))
+rmse_100=sqrt(mean(MSElasso25))
+
+rmse_25
+rmse_50
+rmse_75
+
+rmse_100
+```
+### Q3 d)
+#### The polynomial regression model performs the best out of lasso and polynomial regression  since it has the least mean square error. The most important features used in polynomial regression are G1, G2, X2.G2, X3.traveltime, X3.G2 which were selected using Backward feature selection. The features whose AIC values are higher were selected.
