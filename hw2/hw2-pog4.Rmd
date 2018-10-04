@@ -1,0 +1,217 @@
+
+#### Q1
+```{r}
+dataset= read.csv("german_credit_data.csv", header=T)
+head(dataset[5,])
+```
+#### ANSWER : 
+V21 is the response variable. V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19 and V20 are the predictors. The numeric variables are V2, V5, V8, V11, V13, V16, V18, V21. 
+#### Q2 
+(Consider only the following variables in this exploration: V1, V2, V5, V7, V10, V11, V13,V15, V16, V19 and V21.) a) Generate a summary table for the data. For each numerical variable, list: variable name, mean, median, 1st quartile, 3rd quartile, and standard deviation
+
+```{r}
+dataset_new = dataset[,c('V1','V2', 'V5', 'V7', 'V10', 'V11', 'V13','V15', 'V16', 'V19','V21')]
+V2 = c(as.vector(summary(dataset_new$V2)), sd(dataset_new$V2))
+V5 = c(as.vector(summary(dataset_new$V5)), sd(dataset_new$V5))
+V11 = c(as.vector(summary(dataset_new$V11)), sd(dataset_new$V11))
+V13 = c(as.vector(summary(dataset_new$V13)), sd(dataset_new$V13))
+V16 = c(as.vector(summary(dataset_new$V16)), sd(dataset_new$V16))
+V21 = c(as.vector(summary(dataset_new$V21)), sd(dataset_new$V21))
+result = rbind(V2, V5, V11, V13,V16, V21)
+result = as.data.frame(result)
+colnames(result) = c('Min.', '1st Qu.', 'Median', 'Mean', '3rd Qu.', 'Max.', 'Sd')
+result
+
+```
+#### b) 
+For numerical variables, plot the density distribution. Describe whether the variable has a normal distribution or certain type of skew distribution
+```{r fig.width=3.5,fig.height=3}
+library(ggplot2)
+ggplot(dataset_new, aes(x = V2)) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V5)) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V11)) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V13)) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V16)) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V21)) + geom_density() + theme_bw()
+```
+#### Answer:
+V2 doesn't have a normal distribution, it is skewed to the left; V5 doesn't have a normal distribution, it is skewed to the right; V11 doesn't have a normal distribution, it is skewed to the left; V13 doesn't have a normal distribution, it is skewed to the right; V16 doesn't have a normal distribution, it is skewed to the right; V21 doesn't have a normal distribution, it is skewed to the right.
+
+#### c) For each categorical predictor, generate the conditional histogram plot of response variable.
+
+```{r fig.width=3.5,fig.height=3}
+library(ggplot2)
+ggplot(dataset_new, aes(x = V21, fill = V1 ) ) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V21, fill = V7 ) ) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V21, fill = V10 ) ) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V21, fill = V15 ) ) + geom_density() + theme_bw()
+ggplot(dataset_new, aes(x = V21, fill = V19 ) ) + geom_density() + theme_bw()
+```
+
+#### Q3 a) 
+
+Implement a 10-fold cross-validation scheme by splitting the data
+into training and testing sets. Use the training set to train a logistic
+regression model to predict the response variable. Examine the
+performance of different models by varing the number of predictors.
+Report the performance of the models on testing set using proper
+measures (accuracy, precision, recall, F1) and plots (ROC, lift)
+
+#### i)Taking all the features.
+```{r fig.width=3.5,fig.height=3}
+library(car)
+library(caTools)
+library(ggplot2)
+dataset= read.csv("german_credit_data.csv", header=T)
+dataset1 = model.matrix(V21~.,data=dataset)[,-1]
+
+#total=length(dataset$V21)
+#train=floor(total*(0.6))
+#test=total-train
+dataset$V21=recode(dataset$V21,"c(1)=1;else=0")
+#table(dataset$V21)
+
+#train=sample(1:total,train) ## (randomly) sample indices for training set
+precision=dim(10)
+recall=dim(10)
+F1=dim(10)
+accuracy=dim(10)
+for (k in c(1:10)) {
+  
+  test = c((((k-1)*100)+1):(k*100))
+  xtrain = dataset1[-test,]
+  xtest = dataset1[test,]
+  ytrain = dataset$V21[-test]
+  ytest = dataset$V21[test]
+  
+  m1 = glm(V21~.,family=binomial,data=data.frame(V21=ytrain,xtrain))
+
+
+ptest = predict(m1,newdata=data.frame(xtest),type="response")
+btest=floor(ptest+0.5)
+conf.matrix = table(ytest,btest)
+cut=0.5
+truepos <- ytest==1 & ptest>=cut 
+trueneg <- ytest==0 & ptest<cut
+
+precision[k]=sum(truepos)/sum(ptest>=cut)
+recall[k]=sum(truepos)/sum(ytest==1)
+F1[k]= (2*precision[k]*recall[k])/(precision[k]+recall[k])
+accuracy[k]=(sum(truepos)+sum(trueneg))/100
+
+
+
+suppressWarnings(library(ROCR))
+data=data.frame(predictions=ptest,labels=ytest)
+pred <- prediction(data$predictions,data$labels)
+perf <- performance(pred, "sens", "fpr")
+plot(perf)
+}
+mean(accuracy)
+mean(precision)
+mean(recall)
+mean(F1)
+
+```
+#### ii) Taking features with significant co-efficient. 
+```{r fig.width=3.5,fig.height=3}
+
+dataset= read.csv("german_credit_data.csv", header=T)
+dataset1 = model.matrix(V21~.,data=dataset)[,-1]
+
+#total=length(dataset$V21)
+#train=floor(total*(0.6))
+#test=total-train
+dataset$V21=recode(dataset$V21,"c(1)=1;else=0")
+#table(dataset$V21)
+
+#train=sample(1:total,train) ## (randomly) sample indices for training set
+precision=dim(10)
+recall=dim(10)
+F1=dim(10)
+accuracy=dim(10)
+for (k in c(1:10)) {
+  
+  test = c((((k-1)*100)+1):(k*100))
+  xtrain = dataset1[-test,]
+  xtest = dataset1[test,]
+  ytrain = dataset$V21[-test]
+  ytest = dataset$V21[test]
+  
+  m1 = glm(V21~V1A14+V2+V20A202+V9A93+V8+V4A43+V4A42+V4A41+V3A34+V3A33+ V10A103+V14A143+V4A48+V4A49+V19A192+V3A32+V6A65+V6A64+V5,family=binomial,data=data.frame(V21=ytrain,xtrain))
+
+
+ptest = predict(m1,newdata=data.frame(xtest),type="response")
+btest=floor(ptest+0.5)
+conf.matrix = table(ytest,btest)
+cut=0.5
+truepos <- ytest==1 & ptest>=cut 
+trueneg <- ytest==0 & ptest<cut
+
+precision[k]=sum(truepos)/sum(ptest>=cut)
+recall[k]=sum(truepos)/sum(ytest==1)
+F1[k]= (2*precision[k]*recall[k])/(precision[k]+recall[k])
+accuracy[k]=(sum(truepos)+sum(trueneg))/100
+
+
+
+suppressWarnings(library(ROCR))
+data=data.frame(predictions=ptest,labels=ytest)
+pred <- prediction(data$predictions,data$labels)
+perf <- performance(pred, "sens", "fpr")
+plot(perf)
+}
+
+mean(accuracy)
+mean(precision)
+mean(recall)
+mean(F1)
+
+
+```
+#### Q3 B)
+
+For the best model, compute the odds ratio and interpret the effect
+of each predictors
+
+```{r}
+summary(m1)
+```
+#### Answer
+The second model where we have selected features with significant coefficient is the best model.
+
+The exponential function of the regression coefficient (e^b1) is the odds ratio associated with a one-unit increase in the exposure.
+
+Co-efficient of the predictor V1A14 is 1.548e+00 which means a unit increase in V1A14 causes 1.548 times increase in the response variait,
+Co-efficient of the predictor V2 is -2.554e-02 which means a unit increase in it, causes -2.554e-02 times increase in the response variable.
+
+Co-efficient of the predictor V20A202 is 1.110e+00 which means a unit increase in it, causes 1.110e+00 times increase in the response variable.
+
+Co-efficient of the predictor V9A93 is 7.582e-01 which means a unit increase in it, causes 7.582e-01 times increase in the response variable.
+
+Co-efficient of the predictor V8 is -3.514e-01 which means a unit increase in it, causes -3.514e-01 times increase in the response variable.
+
+Co-efficient of the predictor V4A42 is  6.250e-01 which means a unit increase in it, causes 6.250e-01 times increase in the response variable.
+
+Co-efficient of the predictor V4A41 is  1.515e+00 which means a unit increase in it, causes 1.515e+00 times increase in the response variable.
+Co-efficient of the predictor V3A33 is  9.713e-01 which means a unit increase in it, causes 9.713e-01 times increase in the response variable.
+
+Co-efficient of the predictor V10A103 is 9.519e-01 which means a unit increase in it, causes 9.519e-01 times increase in the response variable.
+
+Co-efficient of the predictor V14A143 is 4.644e-01 which means a unit increase in it, causes 4.644e-01 times increase in the response variable.
+
+Co-efficient of the predictor V4A48 is 2.233e+00 which means a unit increase in it, causes 2.233e+00 times increase in the response variable.
+
+Co-efficient of the predictor V4A49 is 8.403e-01 which means a unit increase in it, causes 8.403e-01 times increase in the response variable.
+
+Co-efficient of the predictor V19A192 is 4.298e-01 which means a unit increase in it, causes 4.298e-01 times increase in the response variable.
+
+Co-efficient of the predictor V3A32 is 8.531e-01 which means a unit increase in it, causes 8.531e-01 times increase in the response variable.
+
+Co-efficient of the predictor V6A65 is 7.339e-01 which means a unit increase in it, causes 7.339e-01 times increase in the response variable.
+
+Co-efficient of the predictor V6A64 is 1.247e+00 which means a unit increase in it, causes 1.247e+00 times increase in the response variable.
+
+Co-efficient of the predictor V5 is -1.401e-04 which means a unit increase in it, causes -1.401e-04 times increase in the response variable.
+
+
