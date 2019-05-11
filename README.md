@@ -1,5 +1,5 @@
 # Data-Mining-INFSCI2160
 
-Tool: Rstudio
+Tool: RStudio
 
 Programming Language: R
